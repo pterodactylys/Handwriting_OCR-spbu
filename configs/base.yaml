@@ -1,0 +1,33 @@
+train_csv: data/iam_manifest_train.csv
+val_csv: data/iam_manifest_val.csv
+test_csv: data/iam_manifest_test.csv
+img_height: 32
+batch_size: 16
+num_workers: 0
+epochs: 20
+lr: 0.001
+weight_decay: 0.0001
+use_amp: true
+train_augmentations: true
+checkpoint_dir: checkpoints/crnn_ctc_baseline
+alphabet_path: artifacts/alphabet.json
+prediction_log_dir: artifacts/validation_predictions
+seed: 42
+clip_grad_norm: 5.0
+scheduler_patience: 2
+scheduler_factor: 0.5
+early_stopping_patience: 5
+overfit_num_samples: 0
+log_examples: 8
+model:
+  hidden_size: 256
+  lstm_layers: 2
+  dropout: 0.1
+augmentation:
+  rotation_deg: 2.0
+  translate_px: 2
+  blur_prob: 0.2
+  blur_radius: 0.4
+  contrast_min: 0.9
+  contrast_max: 1.1
+  noise_std: 0.02
