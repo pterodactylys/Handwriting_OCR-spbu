@@ -19,6 +19,7 @@ checkpoints/*
 !checkpoints/.gitkeep
 
 /background
+/assets
 
 # LaTeX build artifacts
 *.aux
