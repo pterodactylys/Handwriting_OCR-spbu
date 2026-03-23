@@ -1,6 +1,10 @@
 __pycache__/
 *.py[cod]
 
+# macOS / editor junk
+.DS_Store
+.vscode/
+
 .pytest_cache/
 .mypy_cache/
 
@@ -13,3 +17,21 @@ artifacts/alphabet.json
 
 checkpoints/*
 !checkpoints/.gitkeep
+
+/background
+
+# LaTeX build artifacts
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.nav
+*.out
+*.run.xml
+*.snm
+*.synctex.gz
+*.toc
+*.vrb

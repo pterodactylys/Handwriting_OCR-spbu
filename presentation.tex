@@ -1,0 +1,42 @@
+\documentclass[aspectratio=169]{beamer}
+
+% Compile with XeLaTeX or LuaLaTeX for robust UTF-8 path handling.
+\usepackage{fontspec}
+\usepackage{graphicx}
+\setsansfont{Open Sans} % Use a clean sans-serif font for better readability
+\renewcommand{\familydefault}{\sfdefault}
+
+\setbeamertemplate{navigation symbols}{}
+\setbeamertemplate{footline}{}
+
+\title{Presentation Title}
+\author{Author Name}
+\date{\today}
+
+\newcommand{\slidebg}[1]{%
+  \setbeamertemplate{background}{%
+    \parbox[c][\paperheight][c]{\paperwidth}{%
+      \includegraphics[width=\paperwidth,height=\paperheight]{#1}%
+    }%
+  }%
+}
+
+\begin{document}
+
+% Title slide background
+\slidebg{background/Новый вариант/png/1.png}
+\begin{frame}[plain]
+  \titlepage
+\end{frame}
+
+% Content slide background (empty)
+\slidebg{background/Новый вариант/png/2.png}
+\begin{frame}[plain]
+\end{frame}
+
+% Closing slide background (empty)
+\slidebg{background/Новый вариант/png/3.png}
+\begin{frame}[plain]
+\end{frame}
+
+\end{document}
