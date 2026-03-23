@@ -1,7 +1,0 @@
-torch
-torchvision
-pandas
-PyYAML
-Pillow
-tqdm
-numpy
