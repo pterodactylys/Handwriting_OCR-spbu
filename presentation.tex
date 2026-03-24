@@ -197,13 +197,50 @@
 \begin{frame}
   \frametitle{Сверточная нейронная сеть}
   \begin{itemize}
-    \item Результат свертки - новая матрица признаков - \(\mathbf{P}_{n-2 \times n-2}\).
+    \item Результат свертки - новая матрица признаков - \(\mathbf{P}_{n-k+1 \times n-k+1}\)
     \item Высокие значения указывают на участки изображения, которые соответствуют шаблону, задаваемому ядром свертки. Низкие значения указывают на отсутствие такого шаблона.
     \item Свертки позволяют модели учиться распознавать сложные шаблоны и структуры в изображении, что особенно важно для задач распознавания рукописного текста, где могут быть вариации в почерке, наклоне и размере символов.
     \item Полученная матрица признаков в виде вектора подается на вход полносвязной нейронной сети.
   \end{itemize}
 \end{frame}
 
+\slidebg{assets/2.png}
+\begin{frame}
+  \frametitle{Метрики качества}
+  \begin{itemize}
+    \item \textbf{CER (Character Error Rate)} \(= \frac{\text{количество ошибок}}{\text{общее количество символов}}\). Метрика, которая измеряет количество ошибок в распознанном тексте.
+    \item \textbf{WER (Word Error Rate)} \(= \frac{\text{количество ошибок}}{\text{общее количество слов}}\). Метрика, которая измеряет количество ошибок в распознанных словах.
+  \end{itemize}
+  Ошибки - вставки, удаления и замены символов или слов. Чем ниже эти метрики, тем лучше качество распознавания.
+\end{frame}
+
+\slidebg{assets/2.png}
+\begin{frame}
+  \frametitle{Метрики: пример}
+Истинный текст: \texttt{The quick brown fox jumps over the lazy dog.}
+
+Распознанный текст: \texttt{The \textcolor{red}{qucik} brown fox \textcolor{red}{jumpts} \textcolor{red}{ove} the lazy \textcolor{red}{do}.}
+  \begin{itemize}
+    \item Количество символов: $44$ (включая пробел)
+    \item Количество слов: $9$
+    \item Ошибки: $4$ (вставка, удаление, замена)
+    \item CER = \((4 / 44) * 100 = 9.09\%\)
+  \end{itemize}
+  \begin{itemize}
+    \item Количество слов с ошибками: $4$ (\texttt{qucik, jumpts, ove, do})
+    \item Общее количество слов: $9$
+    \item WER = \((4 / 9) * 100 = 44.44\%\)
+  \end{itemize}
+\end{frame}
+
+
+% Example:
+
+% Reference: “The quick brown fox jumps over the lazy dog.”
+
+% Hypothesis: “The qucik brown fox jumpts ove the lazy do.”
+
+% CER = (4 errors / 44 total characters) * 100 = 9.09%
 
 % \slidebg{assets/2.png}
 % \begin{frame}
@@ -217,11 +254,10 @@
 %   \end{itemize}
 % \end{frame}
 
-
-% \slidebg{assets/3.png}
-% \begin{frame}
-%   \centering
-%   \Huge Спасибо за внимание!
-% \end{frame}
+\slidebg{assets/3.png}
+\begin{frame}
+  \centering
+  \Huge Спасибо за внимание!
+\end{frame}
 
 \end{document}
