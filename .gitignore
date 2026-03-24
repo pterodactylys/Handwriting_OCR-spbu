@@ -18,9 +18,6 @@ artifacts/alphabet.json
 checkpoints/*
 !checkpoints/.gitkeep
 
-/background
-/assets
-
 # LaTeX build artifacts
 *.aux
 *.bbl
