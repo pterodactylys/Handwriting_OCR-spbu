@@ -179,40 +179,31 @@
 
 \slidebg{assets/2.png}
 \begin{frame}
-  \frametitle{CRNN: визуализация архитектуры}
+  \frametitle{CRNN: визуализация}
   \begin{center}
-    \includegraphics[width=0.9\textwidth,height=0.72\textheight,keepaspectratio]{assets/CRNN_visualisation.png}
+    \hspace*{-2.9cm}\includegraphics[width=1\textwidth,height=0.8\textheight,keepaspectratio]{assets/CRNN_visualisation.png}
   \end{center}
 \end{frame}
 
+\slidebg{assets/2.png}
+\begin{frame}
+  \frametitle{CRNN: визуализация}
+  \begin{center}
+    \hspace*{-2.9cm}\includegraphics[width=1\textwidth,height=0.8\textheight,keepaspectratio]{assets/CRNN_2.png}
+  \end{center}
+\end{frame}
 
+\slidebg{assets/2.png}
+\begin{frame}
+  \frametitle{Сверточная нейронная сеть}
+  \begin{itemize}
+    \item Результат свертки - новая матрица признаков - \(\mathbf{P}_{n-2 \times n-2}\).
+    \item Высокие значения указывают на участки изображения, которые соответствуют шаблону, задаваемому ядром свертки. Низкие значения указывают на отсутствие такого шаблона.
+    \item Свертки позволяют модели учиться распознавать сложные шаблоны и структуры в изображении, что особенно важно для задач распознавания рукописного текста, где могут быть вариации в почерке, наклоне и размере символов.
+    \item Полученная матрица признаков в виде вектора подается на вход полносвязной нейронной сети.
+  \end{itemize}
+\end{frame}
 
-
-
-% \slidebg{assets/2.png}
-% \begin{frame}
-%   \frametitle{План презентации}
-%   \begin{enumerate}
-%     \item Постановка задачи и актуальность.
-%     \item Обзор существующих подходов и их сравнение.
-%     \item Обоснование выбора метода CRNN + CTC.
-%     \item Описание нашего решения и пайплайна обработки.
-%     \item Датасет IAM, метрики CER/WER и протокол оценки.
-%     \item Текущий статус и дальнейшие шаги проекта.
-%   \end{enumerate}
-% \end{frame}
-
-% \slidebg{assets/2.png}
-% \begin{frame}
-%   \frametitle{Наш метод: общая схема}
-%   \begin{itemize}
-%     \item \textbf{Вход:} изображение рукописного текста.
-%     \item \textbf{Предобработка:} бинаризация, выравнивание строк, ресайз, нормализация.
-%     \item \textbf{Модель:} CRNN извлекает признаки и моделирует последовательность.
-%     \item \textbf{Декодирование:} CTC-декодер преобразует вероятности в текст.
-%     \item \textbf{Дополнительно:} лексиконный анализ эмоциональной окраски распознанного текста.
-%   \end{itemize}
-% \end{frame}
 
 % \slidebg{assets/2.png}
 % \begin{frame}
@@ -226,28 +217,6 @@
 %   \end{itemize}
 % \end{frame}
 
-% \slidebg{assets/2.png}
-% \begin{frame}
-%   \frametitle{Наш метод: модель CRNN + CTC}
-%   \begin{itemize}
-%     \item CNN-блок извлекает локальные визуальные признаки символов.
-%     \item RNN-блок учитывает контекст по всей строке.
-%     \item CTC-loss обучает модель без точного посимвольного выравнивания.
-%     \item CER и WER используются как ключевые метрики качества.
-%     \item Датасет: IAM Handwriting Database (строчная разметка и транскрипции).
-%   \end{itemize}
-% \end{frame}
-
-% \slidebg{assets/3.png}
-% \begin{frame}
-%   \frametitle{Текущий статус и дальнейшие шаги}
-%   \begin{itemize}
-%     \item Реализуется базовый пайплайн распознавания рукописного текста.
-%     \item Следующий этап: экспериментальная оценка на IAM (CER/WER).
-%     \item Планируется сравнение с альтернативными архитектурами.
-%     \item Побочная задача: интеграция анализа тональности распознанного текста.
-%   \end{itemize}
-% \end{frame}
 
 % \slidebg{assets/3.png}
 % \begin{frame}
