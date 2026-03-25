@@ -72,6 +72,14 @@
 
 \slidebg{assets/2.png}
 \begin{frame}
+  \frametitle{Пример готового решения}
+   \begin{center}
+    \hspace*{-2.9cm}\includegraphics[width=1\textwidth,height=0.8\textheight,keepaspectratio]{assets/hwr_example_1.png}
+  \end{center}
+\end{frame}
+
+\slidebg{assets/2.png}
+\begin{frame}
   \frametitle{Цель и задачи работы}
   \scriptsize
   \textbf{Цель работы:} разработать программный инструмент для автоматического распознавания рукописного текста и последующего анализа тональности распознанного содержания.
@@ -141,24 +149,40 @@
 \slidebg{assets/2.png}
 \begin{frame}
   \frametitle{Подготовка данных}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.58\textwidth}
+      \begin{itemize}
+        \item Для обучения модели будет использоваться датасет IAM Handwriting Database, который содержит рукописные тексты с разметкой.
+        \item Датасет включает в себя изображения строк рукописного текста и соответствующие им текстовые транскрипты.
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.38\textwidth}
+      \centering
+      \includegraphics[width=\linewidth,height=0.8\textheight,keepaspectratio]{assets/iam_3.jpeg}
+    \end{column}
+  \end{columns}
 \end{frame}
 
 
 \slidebg{assets/2.png}
 \begin{frame}
   \frametitle{Разбиение выборки}
+  \begin{itemize}
+    \item Датасет будет разделен на обучающую, валидационную и тестовую части в соотношении 70\% - 15\% - 15\%.
+    \item Важно обеспечить, чтобы строки из одного документа не попадали одновременно в разные части выборки, чтобы избежать утечки данных.
+    \item Строки одного автора также будут распределены по разным частям выборки, чтобы модель не могла просто запомнить почерк конкретного человека.
+  \end{itemize}
 \end{frame}
 
 
 \slidebg{assets/2.png}
 \begin{frame}
   \frametitle{Препроцессинг изображений}
+  \begin{center}
+    \hspace*{-0.55cm}\includegraphics[width=1.08\textwidth,height=1.05\textheight,keepaspectratio]{assets/segmentation_1.png}
+  \end{center}
 \end{frame}
 
-\slidebg{assets/2.png}
-\begin{frame}
-  \frametitle{Нормализация пакетов}
-\end{frame}
 
 
 \slidebg{assets/2.png}
@@ -222,13 +246,12 @@
 Распознанный текст: \texttt{The \textcolor{red}{qucik} brown fox \textcolor{red}{jumpts} \textcolor{red}{ove} the lazy \textcolor{red}{do}.}
   \begin{itemize}
     \item Количество символов: $44$ (включая пробел)
-    \item Количество слов: $9$
     \item Ошибки: $4$ (вставка, удаление, замена)
     \item CER = \((4 / 44) * 100 = 9.09\%\)
   \end{itemize}
   \begin{itemize}
     \item Количество слов с ошибками: $4$ (\texttt{qucik, jumpts, ove, do})
-    \item Общее количество слов: $9$
+    \item Количество слов: $9$
     \item WER = \((4 / 9) * 100 = 44.44\%\)
   \end{itemize}
 \end{frame}
