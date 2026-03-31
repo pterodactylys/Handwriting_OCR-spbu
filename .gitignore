@@ -1,15 +1,12 @@
 __pycache__/
-*.py[cod]
 
-.pytest_cache/
-.mypy_cache/
-
-data/
+.DS_Store
+.env
 
 
-artifacts/*.csv
-artifacts/alphabet.json
-!artifacts/.gitkeep
-
-checkpoints/*
-!checkpoints/.gitkeep
+raw/
+data_full/
+data_small/
+checkpoints/
+artifacts/
+processed/
