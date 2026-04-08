@@ -2,9 +2,11 @@ __pycache__/
 
 .DS_Store
 .env
+*.tgz
 
 
 raw/
+data/HKR/
 data_full/
 data_small/
 checkpoints/
