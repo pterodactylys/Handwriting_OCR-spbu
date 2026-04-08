@@ -6,6 +6,7 @@ __pycache__/
 
 
 raw/
+lexicons/
 data/HKR/
 data_full/
 data_small/
