@@ -69,5 +69,5 @@ Will be added after the first working version of the program is implemented.
 
 ## Authors
 
-- Andrey Telitsin [@pterodactylys](https://github.com/pterodactylys)
+- Andrey Telitsin [@atelitsin](https://github.com/atelitsin)
 - Kamil Shaimiev [@kameel4](https://github.com/kameel4)

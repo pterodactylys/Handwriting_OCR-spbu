@@ -67,5 +67,5 @@ Handwriting_OCR-spbu/
 
 ## Авторы
 
-- Телицин Андрей [@pterodactylys](https://github.com/pterodactylys)
+- Телицин Андрей [@atelitsin](https://github.com/atelitsin)
 - Шаймиев Камиль [@kameel4](https://github.com/kameel4)
