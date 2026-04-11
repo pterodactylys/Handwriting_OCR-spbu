@@ -34,6 +34,10 @@ MAX_WORDS_PER_CHUNK = 2
 WORD_CHUNK_PADDING = 4
 PREVIEW_MAX_SIZE = (420, 280)
 GRAPH_SIZE = (1200, 280)
+GRID_PREVIEW_SIZE = (320, 220)
+LINE_INK_THRESHOLD_RATIO = 0.06
+LINE_MIN_HEIGHT_RATIO = 0.08
+LINE_VERTICAL_PADDING = 6
 
 LEXICON_PATH = ROOT / "data" / "lexicons" / "RusEmoLex.csv"
 WORDFREQ_FREQ_PATH = ROOT / "data" / "lexicons" / "wordfreq_ru.tsv"
@@ -47,6 +51,11 @@ EMOTION_COLORS = {
     "surprise": "#0f9d58",
     "disgust": "#8d6e63",
 }
+VARIANT_ORDER = [
+    ("baseline", "Baseline"),
+    ("baseline_segmented", "Baseline + segmented"),
+    ("thresholded_segmented", "Thresholded + segmented"),
+]
 
 
 try:
@@ -312,6 +321,127 @@ def stitch_chunk_previews(chunk_images: list[Image.Image], gap: int = 12, backgr
         canvas.paste(chunk_img, (x_offset, y_offset))
         x_offset += chunk_img.width + gap
     return canvas
+
+
+def stitch_line_previews(line_images: list[Image.Image], gap: int = 16, background: int = 255) -> Image.Image:
+    if not line_images:
+        return Image.new("L", (64, 64), color=background)
+
+    max_width = max(img.width for img in line_images)
+    total_height = sum(img.height for img in line_images) + gap * max(0, len(line_images) - 1)
+    canvas = Image.new("L", (max_width, total_height), color=background)
+
+    y_offset = 0
+    for line_img in line_images:
+        x_offset = (max_width - line_img.width) // 2
+        canvas.paste(line_img, (x_offset, y_offset))
+        y_offset += line_img.height + gap
+    return canvas
+
+
+def find_line_bounds(
+    binary_arr: np.ndarray,
+    *,
+    ink_threshold_ratio: float = LINE_INK_THRESHOLD_RATIO,
+    min_line_height_ratio: float = LINE_MIN_HEIGHT_RATIO,
+    vertical_padding: int = LINE_VERTICAL_PADDING,
+) -> list[tuple[int, int]]:
+    ink_profile = (binary_arr == 0).sum(axis=1).astype(np.float32)
+    if ink_profile.max(initial=0) <= 0:
+        return [(0, binary_arr.shape[0])]
+
+    window = max(9, int(round(binary_arr.shape[0] * 0.015)))
+    if window % 2 == 0:
+        window += 1
+    kernel = np.ones(window, dtype=np.float32) / window
+    smooth = np.convolve(ink_profile, kernel, mode="same")
+
+    threshold = max(3.0, float(smooth.max()) * ink_threshold_ratio)
+    active_rows = smooth > threshold
+    min_line_height = max(12, int(round(binary_arr.shape[0] * min_line_height_ratio)))
+
+    runs: list[tuple[int, int]] = []
+    start = None
+    for index, is_active in enumerate(active_rows):
+        if is_active and start is None:
+            start = index
+        elif not is_active and start is not None:
+            if index - start >= min_line_height:
+                runs.append((start, index))
+            start = None
+    if start is not None and len(active_rows) - start >= min_line_height:
+        runs.append((start, len(active_rows)))
+
+    if not runs:
+        content_rows = np.flatnonzero(ink_profile > 0)
+        if content_rows.size == 0:
+            return [(0, binary_arr.shape[0])]
+        runs = [(int(content_rows[0]), int(content_rows[-1]) + 1)]
+
+    bounds = []
+    height = binary_arr.shape[0]
+    for start, end in runs:
+        y0 = max(0, int(start) - vertical_padding)
+        y1 = min(height, int(end) + vertical_padding)
+        bounds.append((y0, y1))
+    return bounds
+
+
+def segment_lines_from_source(source_img: Image.Image, binary_arr: np.ndarray) -> list[dict[str, object]]:
+    line_bounds = find_line_bounds(binary_arr)
+    line_infos: list[dict[str, object]] = []
+    for y0, y1 in line_bounds:
+        raw_line_img = source_img.crop((0, y0, source_img.width, y1))
+        raw_line_binary = binary_arr[y0:y1, :]
+        line_bbox = compute_content_bbox_from_binary(raw_line_binary, padding=max(1, WORD_CHUNK_PADDING // 2))
+        line_img = raw_line_img.crop(line_bbox)
+        line_binary = raw_line_binary[line_bbox[1] : line_bbox[3], line_bbox[0] : line_bbox[2]]
+        line_infos.append(
+            {
+                "image": line_img,
+                "binary": line_binary,
+                "box": (line_bbox[0], y0 + line_bbox[1], line_bbox[2], y0 + line_bbox[3]),
+            }
+        )
+    return line_infos
+
+
+def segment_words_from_source(
+    source_img: Image.Image,
+    binary_arr: np.ndarray,
+    *,
+    min_gap_width: int = WORD_GAP_MIN_WIDTH,
+    max_words_per_chunk: int = MAX_WORDS_PER_CHUNK,
+) -> dict[str, object]:
+    word_bounds = find_word_bounds(binary_arr, min_gap_width=min_gap_width)
+    chunk_bounds = group_word_bounds(
+        word_bounds,
+        max_words_per_chunk=max_words_per_chunk,
+        padding=WORD_CHUNK_PADDING,
+        max_width=source_img.width,
+    )
+
+    chunk_images = []
+    for start, end in chunk_bounds:
+        raw_chunk_img = source_img.crop((start, 0, end, source_img.height))
+        raw_chunk_binary = binary_arr[:, start:end]
+        chunk_bbox = compute_content_bbox_from_binary(raw_chunk_binary, padding=max(1, WORD_CHUNK_PADDING // 2))
+        chunk_images.append(raw_chunk_img.crop(chunk_bbox))
+
+    return {
+        "word_bounds": word_bounds,
+        "chunk_bounds": chunk_bounds,
+        "chunk_images": chunk_images,
+    }
+
+
+def draw_segmented_preview(source_img: Image.Image, chunk_bounds: list[tuple[int, int]]) -> Image.Image:
+    preview = source_img.convert("RGB")
+    draw = ImageDraw.Draw(preview)
+    for start, end in chunk_bounds:
+        draw.line((start, 0, start, preview.height), fill=(0, 191, 255), width=2)
+        draw.line((end, 0, end, preview.height), fill=(0, 191, 255), width=2)
+    return preview
 
 
 def draw_word_bound_preview(thresholded_img: Image.Image, word_bounds: list[tuple[int, int]]) -> Image.Image:
@@ -1009,15 +1139,14 @@ class OCRModelBundle:
 
 @dataclass
 class OCRResult:
-    image_path: Path
-    language: str
-    threshold_enabled: bool
-    checkpoint_path: Path
+    key: str
+    label: str
     prediction: str
-    original_preview: Image.Image
-    processed_preview: Image.Image
-    model_input_preview: Image.Image
+    preview_image: Image.Image
+    chunk_strip_image: Image.Image
     chunk_predictions: list[str]
+    line_predictions: list[str]
+    line_boxes: list[tuple[int, int, int, int]]
     word_bounds: list[tuple[int, int]]
     chunk_bounds: list[tuple[int, int]]
     notes: list[str]
@@ -1030,6 +1159,21 @@ class EmotionSummary:
     result: AnalysisResult | None = None
     distribution: dict[str, float] | None = None
     dominant: str | None = None
+
+
+@dataclass
+class VariantAnalysis:
+    ocr: OCRResult
+    emotion: EmotionSummary
+
+
+@dataclass
+class AnalysisBundle:
+    image_path: Path
+    language: str
+    checkpoint_path: Path
+    original_preview: Image.Image
+    variants: dict[str, VariantAnalysis]
 
 
 class EmotionRuntime:
@@ -1125,16 +1269,50 @@ class InferenceEngine:
         self._model_cache: dict[str, OCRModelBundle] = {}
         self._emotion_runtime: EmotionRuntime | None = None
 
-    def _checkpoint_candidates(self, language: str) -> list[Path]:
-        if language == "ru":
-            return [ROOT / "crnn_ru_checkpoint_last.pth", ROOT / "trained_models" / "crnn_checkpoint_best_ru.pth"]
-        return [ROOT / "trained_models" / "crnn_checkpoint_best_en.pth"]
+    def list_available_checkpoints(self) -> list[Path]:
+        roots = [ROOT, ROOT / "trained_models"]
+        paths: list[Path] = []
+        for base in roots:
+            if not base.exists():
+                continue
+            for path in base.rglob("*.pth"):
+                if path.is_file() and path not in paths:
+                    paths.append(path)
+        return sorted(paths, key=lambda item: str(item.relative_to(ROOT)).lower())
 
-    def get_model(self, language: str) -> OCRModelBundle:
-        if language in self._model_cache:
-            return self._model_cache[language]
+    def list_available_checkpoint_labels(self) -> list[str]:
+        return [str(path.relative_to(ROOT)) for path in self.list_available_checkpoints()]
 
-        checkpoint_path = next((path for path in self._checkpoint_candidates(language) if path.exists()), None)
+    def default_checkpoint_label(self, language: str) -> str:
+        labels = self.list_available_checkpoint_labels()
+        if not labels:
+            return ""
+        preferred_tokens = ["_ru", "ru_", "best_ru", "checkpoint_best_ru"] if language == "ru" else ["_en", "en_", "best_en", "checkpoint_best_en"]
+        for label in labels:
+            lower = label.lower()
+            if any(token in lower for token in preferred_tokens):
+                return label
+        return labels[0]
+
+    def resolve_checkpoint_path(self, checkpoint_label: str | None, language: str) -> Path:
+        if checkpoint_label:
+            path = Path(checkpoint_label)
+            if not path.is_absolute():
+                path = ROOT / path
+            if path.exists():
+                return path
+
+        default_label = self.default_checkpoint_label(language)
+        if default_label:
+            return ROOT / default_label
+        raise FileNotFoundError(f"No checkpoint found for language={language}")
+
+    def get_model(self, language: str, checkpoint_label: str | None = None) -> OCRModelBundle:
+        checkpoint_path = self.resolve_checkpoint_path(checkpoint_label, language)
+        cache_key = str(checkpoint_path.resolve()).lower()
+        if cache_key in self._model_cache:
+            return self._model_cache[cache_key]
+
         if checkpoint_path is None:
             raise FileNotFoundError(f"No checkpoint found for language={language}")
 
@@ -1156,7 +1334,7 @@ class InferenceEngine:
         model.eval()
 
         bundle = OCRModelBundle(language, checkpoint_path, model, mapper, self.device)
-        self._model_cache[language] = bundle
+        self._model_cache[cache_key] = bundle
         return bundle
 
     def get_emotion_runtime(self) -> EmotionRuntime:
@@ -1242,84 +1420,135 @@ class InferenceEngine:
             "chunk_images": chunk_images,
         }
 
-    def analyze_image(
+    def build_emotion_summary(self, language: str, prediction: str) -> EmotionSummary:
+        if language != "ru":
+            return EmotionSummary(False, "Emotion analysis in this repo is currently implemented only for Russian text.")
+        return self.get_emotion_runtime().analyze(prediction)
+
+    def _predict_segmented_variant(
+        self,
+        *,
+        bundle: OCRModelBundle,
+        source_img: Image.Image,
+        binary_arr: np.ndarray,
+        variant_key: str,
+        variant_label: str,
+        chunk_resample: Image.Resampling,
+        note_prefix: str,
+    ) -> OCRResult:
+        segmentation = segment_words_from_source(source_img, binary_arr)
+        chunk_predictions: list[str] = []
+        for chunk_img in segmentation["chunk_images"]:
+            _, chunk_prediction = bundle.predict_pil(chunk_img, resample=chunk_resample)
+            chunk_predictions.append(chunk_prediction.strip())
+
+        prediction = " ".join(pred for pred in chunk_predictions if pred).strip()
+        if not prediction:
+            fallback_preview, prediction = bundle.predict_pil(source_img, resample=chunk_resample)
+            chunk_predictions = [prediction]
+            chunk_strip_image = fallback_preview
+            chunk_bounds = [(0, source_img.width)]
+            word_bounds = [(0, source_img.width)]
+        else:
+            chunk_strip_image = stitch_chunk_previews(segmentation["chunk_images"] or [source_img])
+            chunk_bounds = segmentation["chunk_bounds"]
+            word_bounds = segmentation["word_bounds"]
+
+        preview_image = draw_segmented_preview(source_img, chunk_bounds)
+        return OCRResult(
+            key=variant_key,
+            label=variant_label,
+            prediction=prediction,
+            preview_image=preview_image,
+            chunk_strip_image=chunk_strip_image,
+            chunk_predictions=chunk_predictions,
+            line_predictions=[prediction] if prediction else [],
+            line_boxes=[],
+            word_bounds=word_bounds,
+            chunk_bounds=chunk_bounds,
+            notes=[
+                f"{note_prefix}: {len(chunk_predictions)} chunk prediction(s)",
+            ],
+        )
+
+    def analyze_image_bundle(
         self,
         image_path: Path,
         *,
         language: str,
-        threshold_enabled: bool,
+        checkpoint_label: str | None = None,
         threshold_value: int = MASK_THRESHOLD,
         min_component_area: int = MIN_COMPONENT_AREA,
-    ) -> tuple[OCRResult, EmotionSummary]:
-        bundle = self.get_model(language)
+    ) -> AnalysisBundle:
+        bundle = self.get_model(language, checkpoint_label=checkpoint_label)
         baseline = self.preprocess_baseline(image_path, img_height=bundle.img_height)
-        notes = [f"Device: {bundle.device.type}", f"Checkpoint: {bundle.checkpoint_path.name}"]
+        baseline_model_img = baseline["resized"]
+        baseline_prediction = bundle.predict_resized_pil(baseline_model_img)
+        baseline_ocr = OCRResult(
+            key="baseline",
+            label="Baseline",
+            prediction=baseline_prediction,
+            preview_image=baseline_model_img,
+            chunk_strip_image=baseline_model_img,
+            chunk_predictions=[baseline_prediction],
+            line_predictions=[baseline_prediction],
+            line_boxes=[],
+            word_bounds=[],
+            chunk_bounds=[],
+            notes=[
+                "Baseline: single resized pass",
+                f"Checkpoint: {bundle.checkpoint_path.name}",
+                f"Mask threshold={threshold_value}, min area={min_component_area}",
+            ],
+        )
 
-        if threshold_enabled:
-            thresholded = self.make_thresholded_preprocessing(
-                image_path,
-                img_height=bundle.img_height,
-                threshold_value=threshold_value,
-                min_component_area=min_component_area,
-            )
-            segmented = self.segment_thresholded_words(thresholded["thresholded_cropped_img"])
+        baseline_binary = build_binary_mask(baseline["cropped"], threshold=threshold_value)
+        baseline_segmented_ocr = self._predict_segmented_variant(
+            bundle=bundle,
+            source_img=baseline["cropped"],
+            binary_arr=baseline_binary,
+            variant_key="baseline_segmented",
+            variant_label="Baseline + segmented",
+            chunk_resample=Image.Resampling.LANCZOS,
+            note_prefix="Baseline segmented",
+        )
+        baseline_segmented_ocr.notes.append(f"Mask threshold={threshold_value}, min area={min_component_area}")
 
-            chunk_predictions = []
-            for chunk_img in segmented["chunk_images"]:
-                _, chunk_prediction = bundle.predict_pil(chunk_img, resample=Image.Resampling.NEAREST)
-                chunk_predictions.append(chunk_prediction.strip())
+        thresholded = self.make_thresholded_preprocessing(
+            image_path,
+            img_height=bundle.img_height,
+            threshold_value=threshold_value,
+            min_component_area=min_component_area,
+        )
+        threshold_binary = np.array(thresholded["thresholded_cropped_img"], dtype=np.uint8)
+        thresholded_segmented_ocr = self._predict_segmented_variant(
+            bundle=bundle,
+            source_img=thresholded["thresholded_cropped_img"],
+            binary_arr=threshold_binary,
+            variant_key="thresholded_segmented",
+            variant_label="Thresholded + segmented",
+            chunk_resample=Image.Resampling.NEAREST,
+            note_prefix="Thresholded segmented",
+        )
+        thresholded_segmented_ocr.notes.append(f"Mask threshold={threshold_value}, min area={min_component_area}")
 
-            prediction = " ".join(pred for pred in chunk_predictions if pred)
-            if not prediction:
-                prediction = bundle.predict_resized_pil(thresholded["thresholded_model_img"])
-                chunk_predictions = [prediction]
-                segmented["word_bounds"] = [(0, thresholded["thresholded_cropped_img"].width)]
-                segmented["chunk_bounds"] = [(0, thresholded["thresholded_cropped_img"].width)]
-
-            processed_preview = draw_word_bound_preview(thresholded["thresholded_cropped_img"], segmented["word_bounds"])
-            model_input_preview = stitch_chunk_previews(segmented["chunk_images"] or [thresholded["thresholded_cropped_img"]])
-            notes.append(
-                f"Threshold on: {len(segmented['word_bounds'])} word bounds, {len(segmented['chunk_bounds'])} chunk(s)"
-            )
-            notes.append(f"Mask threshold={threshold_value}, min area={min_component_area}")
-            ocr_result = OCRResult(
-                image_path=image_path,
-                language=language,
-                threshold_enabled=True,
-                checkpoint_path=bundle.checkpoint_path,
-                prediction=prediction,
-                original_preview=baseline["original"],
-                processed_preview=processed_preview,
-                model_input_preview=model_input_preview,
-                chunk_predictions=chunk_predictions,
-                word_bounds=list(segmented["word_bounds"]),
-                chunk_bounds=list(segmented["chunk_bounds"]),
-                notes=notes,
-            )
-        else:
-            baseline_model_img, prediction = bundle.predict_pil(baseline["cropped"])
-            notes.append("Threshold off: single baseline pass")
-            notes.append(f"Mask threshold={threshold_value}, min area={min_component_area}")
-            ocr_result = OCRResult(
-                image_path=image_path,
-                language=language,
-                threshold_enabled=False,
-                checkpoint_path=bundle.checkpoint_path,
-                prediction=prediction,
-                original_preview=baseline["original"],
-                processed_preview=baseline["cropped"],
-                model_input_preview=baseline_model_img,
-                chunk_predictions=[prediction],
-                word_bounds=[],
-                chunk_bounds=[],
-                notes=notes,
-            )
-
-        if language != "ru":
-            emotion_summary = EmotionSummary(False, "Emotion analysis in this repo is currently implemented only for Russian text.")
-        else:
-            emotion_summary = self.get_emotion_runtime().analyze(ocr_result.prediction)
-        return ocr_result, emotion_summary
+        return AnalysisBundle(
+            image_path=image_path,
+            language=language,
+            checkpoint_path=bundle.checkpoint_path,
+            original_preview=baseline["original"],
+            variants={
+                "baseline": VariantAnalysis(baseline_ocr, self.build_emotion_summary(language, baseline_ocr.prediction)),
+                "baseline_segmented": VariantAnalysis(
+                    baseline_segmented_ocr,
+                    self.build_emotion_summary(language, baseline_segmented_ocr.prediction),
+                ),
+                "thresholded_segmented": VariantAnalysis(
+                    thresholded_segmented_ocr,
+                    self.build_emotion_summary(language, thresholded_segmented_ocr.prediction),
+                ),
+            },
+        )
 
 
 def format_distribution(distribution: dict[str, float] | None) -> str:
@@ -1415,20 +1644,23 @@ class OCRUI:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("Handwriting OCR + Emotion UI")
-        self.root.geometry("1400x900")
-        self.root.minsize(1100, 780)
+        self.root.geometry("1650x980")
+        self.root.minsize(1300, 860)
 
         self.engine = InferenceEngine()
         self.file_var = tk.StringVar(value=self._default_image_path())
         self.language_var = tk.StringVar(value="ru")
-        self.threshold_var = tk.BooleanVar(value=True)
+        self.checkpoint_var = tk.StringVar()
+        self.graph_variant_var = tk.StringVar(value="thresholded_segmented")
         self.mask_threshold_var = tk.IntVar(value=MASK_THRESHOLD)
         self.min_area_var = tk.IntVar(value=MIN_COMPONENT_AREA)
         self.status_var = tk.StringVar(value="Ready")
         self.summary_var = tk.StringVar(value="Choose an image and run Analyze.")
         self._photo_refs: dict[str, ImageTk.PhotoImage] = {}
+        self.last_bundle: AnalysisBundle | None = None
 
         self._build_layout()
+        self.refresh_checkpoint_options(force_default=True)
         placeholder_summary = EmotionSummary(False, "Run analysis to see the emotion graph.")
         self._set_preview("graph", self.graph_label, make_emotion_graph_image(placeholder_summary), max_size=GRAPH_SIZE)
 
@@ -1451,16 +1683,19 @@ class OCRUI:
         controls = ttk.Frame(self.root, padding=12)
         controls.grid(row=0, column=0, sticky="ew")
         controls.columnconfigure(1, weight=1)
+        controls.columnconfigure(5, weight=1)
 
         ttk.Label(controls, text="Image").grid(row=0, column=0, sticky="w", padx=(0, 8))
         ttk.Entry(controls, textvariable=self.file_var).grid(row=0, column=1, sticky="ew", padx=(0, 8))
         ttk.Button(controls, text="Browse", command=self.browse_file).grid(row=0, column=2, padx=(0, 12))
         ttk.Label(controls, text="Language").grid(row=0, column=3, sticky="w", padx=(0, 8))
-        ttk.Combobox(controls, textvariable=self.language_var, values=["ru", "en"], state="readonly", width=8).grid(
-            row=0, column=4, padx=(0, 12)
-        )
-        ttk.Checkbutton(controls, text="Threshold + segmentation", variable=self.threshold_var).grid(row=0, column=5, padx=(0, 12))
-        ttk.Button(controls, text="Analyze", command=self.analyze).grid(row=0, column=6)
+        self.language_combo = ttk.Combobox(controls, textvariable=self.language_var, values=["ru", "en"], state="readonly", width=8)
+        self.language_combo.grid(row=0, column=4, padx=(0, 12))
+        self.language_combo.bind("<<ComboboxSelected>>", self.on_language_changed)
+        ttk.Label(controls, text="Checkpoint").grid(row=0, column=5, sticky="w", padx=(0, 8))
+        self.checkpoint_combo = ttk.Combobox(controls, textvariable=self.checkpoint_var, state="readonly", width=40)
+        self.checkpoint_combo.grid(row=0, column=6, sticky="ew", padx=(0, 12))
+        ttk.Button(controls, text="Analyze", command=self.analyze).grid(row=0, column=7)
 
         ttk.Label(controls, text="Mask threshold").grid(row=1, column=0, sticky="w", pady=(10, 0))
         tk.Scale(
@@ -1483,25 +1718,41 @@ class OCRUI:
             length=180,
         ).grid(row=1, column=4, sticky="w", pady=(8, 0))
 
+        ttk.Label(controls, text="Graph source").grid(row=1, column=5, sticky="w", pady=(10, 0))
+        graph_switches = ttk.Frame(controls)
+        graph_switches.grid(row=1, column=6, sticky="w", pady=(8, 0))
+        for key, label in VARIANT_ORDER:
+            ttk.Radiobutton(
+                graph_switches,
+                text=label,
+                value=key,
+                variable=self.graph_variant_var,
+                command=self.refresh_graph,
+            ).pack(side="left", padx=(0, 8))
+
         preview_frame = ttk.Frame(self.root, padding=(12, 0, 12, 12))
         preview_frame.grid(row=1, column=0, sticky="nsew")
-        for col in range(3):
+        for col in range(4):
             preview_frame.columnconfigure(col, weight=1)
         preview_frame.rowconfigure(1, weight=1)
 
         self.original_title = ttk.Label(preview_frame, text="Original")
         self.original_title.grid(row=0, column=0, sticky="w", pady=(0, 6))
-        self.processed_title = ttk.Label(preview_frame, text="Processed")
-        self.processed_title.grid(row=0, column=1, sticky="w", pady=(0, 6))
-        self.model_title = ttk.Label(preview_frame, text="Model Input / Chunks")
-        self.model_title.grid(row=0, column=2, sticky="w", pady=(0, 6))
+        self.baseline_title = ttk.Label(preview_frame, text="Baseline")
+        self.baseline_title.grid(row=0, column=1, sticky="w", pady=(0, 6))
+        self.baseline_segmented_title = ttk.Label(preview_frame, text="Baseline + segmented")
+        self.baseline_segmented_title.grid(row=0, column=2, sticky="w", pady=(0, 6))
+        self.thresholded_title = ttk.Label(preview_frame, text="Thresholded + segmented")
+        self.thresholded_title.grid(row=0, column=3, sticky="w", pady=(0, 6))
 
         self.original_image_label = ttk.Label(preview_frame, relief="solid", anchor="center")
         self.original_image_label.grid(row=1, column=0, sticky="nsew", padx=(0, 8))
-        self.processed_image_label = ttk.Label(preview_frame, relief="solid", anchor="center")
-        self.processed_image_label.grid(row=1, column=1, sticky="nsew", padx=(0, 8))
-        self.model_image_label = ttk.Label(preview_frame, relief="solid", anchor="center")
-        self.model_image_label.grid(row=1, column=2, sticky="nsew")
+        self.baseline_image_label = ttk.Label(preview_frame, relief="solid", anchor="center")
+        self.baseline_image_label.grid(row=1, column=1, sticky="nsew", padx=(0, 8))
+        self.baseline_segmented_image_label = ttk.Label(preview_frame, relief="solid", anchor="center")
+        self.baseline_segmented_image_label.grid(row=1, column=2, sticky="nsew", padx=(0, 8))
+        self.thresholded_image_label = ttk.Label(preview_frame, relief="solid", anchor="center")
+        self.thresholded_image_label.grid(row=1, column=3, sticky="nsew")
 
         output_frame = ttk.Frame(self.root, padding=(12, 0, 12, 12))
         output_frame.grid(row=2, column=0, sticky="nsew")
@@ -1538,66 +1789,95 @@ class OCRUI:
         self._photo_refs[slot] = photo
         widget.configure(image=photo)
 
-    def render_summary(self, ocr_result: OCRResult, emotion_summary: EmotionSummary) -> str:
+    def _short(self, value: str, limit: int = 54) -> str:
+        compact = " ".join(value.split())
+        if len(compact) <= limit:
+            return compact
+        return compact[: limit - 3] + "..."
+
+    def refresh_checkpoint_options(self, *, force_default: bool = False) -> None:
+        labels = self.engine.list_available_checkpoint_labels()
+        self.checkpoint_combo.configure(values=labels)
+        preferred = self.engine.default_checkpoint_label(self.language_var.get())
+        current = self.checkpoint_var.get()
+        if force_default or current not in labels:
+            self.checkpoint_var.set(preferred or (labels[0] if labels else ""))
+
+    def on_language_changed(self, _event=None) -> None:
+        self.refresh_checkpoint_options(force_default=True)
+
+    def render_summary(self, bundle: AnalysisBundle) -> str:
+        selected_key = self.graph_variant_var.get()
+        selected = bundle.variants[selected_key]
         parts = [
-            f"Prediction: {ocr_result.prediction or '<empty>'}",
-            f"Language: {ocr_result.language}",
-            f"Checkpoint: {ocr_result.checkpoint_path.name}",
-            f"Threshold: {'on' if ocr_result.threshold_enabled else 'off'}",
-            f"Mask threshold: {self.mask_threshold_var.get()}",
-            f"Min area: {self.min_area_var.get()}",
-        ]
-        if ocr_result.chunk_predictions:
-            parts.append(f"Chunks: {ocr_result.chunk_predictions}")
-        if emotion_summary.available and emotion_summary.result is not None:
-            result = emotion_summary.result
-            parts.append(f"Dominant emotion: {emotion_summary.dominant or 'none'}")
-            parts.append(f"Corrected text: {result.corrected_text or '<empty>'}")
-        else:
-            parts.append(emotion_summary.note)
-        return " | ".join(parts)
-
-    def render_output(self, ocr_result: OCRResult, emotion_summary: EmotionSummary) -> str:
-        lines = [
-            f"Image:      {ocr_result.image_path}",
-            f"Language:   {ocr_result.language}",
-            f"Threshold:  {'on' if ocr_result.threshold_enabled else 'off'}",
-            f"Checkpoint: {ocr_result.checkpoint_path}",
+            f"Language: {bundle.language} | Checkpoint: {bundle.checkpoint_path.name}",
+            f"Graph source: {selected.ocr.label} | Mask threshold: {self.mask_threshold_var.get()} | Min area: {self.min_area_var.get()}",
             "",
-            "OCR",
-            f"Prediction: {ocr_result.prediction or '<empty>'}",
         ]
-        if ocr_result.chunk_predictions:
-            lines.append(f"Chunks:      {ocr_result.chunk_predictions}")
-        if ocr_result.word_bounds:
-            lines.append(f"Word bounds: {ocr_result.word_bounds}")
-        if ocr_result.chunk_bounds:
-            lines.append(f"Chunk bounds: {ocr_result.chunk_bounds}")
-        if ocr_result.notes:
-            lines.extend(["", "Notes"] + ocr_result.notes)
-
-        lines.extend(["", "Emotion"])
-        if not emotion_summary.available:
-            lines.append(emotion_summary.note)
-        else:
-            result = emotion_summary.result
-            assert result is not None
-            lines.extend(
+        for key, label in VARIANT_ORDER:
+            parts.append(f"{label}: {bundle.variants[key].ocr.prediction or '<empty>'}")
+        if selected.emotion.available and selected.emotion.result is not None:
+            result = selected.emotion.result
+            parts.extend(
                 [
-                    f"Resource note:    {emotion_summary.note}",
-                    f"Normalized text:  {result.normalized_text}",
-                    f"Corrected text:   {result.corrected_text}",
-                    f"Token count:      {result.content_token_count}",
-                    f"Enough text:      {result.enough_text}",
-                    f"Dominant emotion: {emotion_summary.dominant or 'none'}",
-                    f"Distribution:     {format_distribution(emotion_summary.distribution)}",
-                    f"Raw scores:       {result.emotion_scores}",
                     "",
-                    "Matches",
-                    format_matches(result),
+                    f"Selected dominant emotion: {selected.emotion.dominant or 'none'}",
+                    f"Selected distribution: {format_distribution(selected.emotion.distribution)}",
+                    f"Selected corrected text: {result.corrected_text or '<empty>'}",
                 ]
             )
-        return "\n".join(lines)
+        else:
+            parts.append(selected.emotion.note)
+        return "\n".join(parts)
+
+    def render_cli_output(self, bundle: AnalysisBundle) -> str:
+        lines = [
+            f"Image:      {bundle.image_path}",
+            f"Language:   {bundle.language}",
+            f"Checkpoint: {bundle.checkpoint_path}",
+            "",
+        ]
+        for key, label in VARIANT_ORDER:
+            variant = bundle.variants[key]
+            lines.extend(
+                [
+                    label.upper(),
+                    f"OCR prediction: {variant.ocr.prediction or '<empty>'}",
+                    f"Line predictions: {variant.ocr.line_predictions}",
+                    f"Chunk predictions: {variant.ocr.chunk_predictions}",
+                    f"Line boxes: {variant.ocr.line_boxes}",
+                    f"Chunk bounds: {variant.ocr.chunk_bounds}",
+                ]
+            )
+            if variant.emotion.available and variant.emotion.result is not None:
+                result = variant.emotion.result
+                lines.extend(
+                    [
+                        f"Dominant emotion: {variant.emotion.dominant or 'none'}",
+                        f"Distribution: {format_distribution(variant.emotion.distribution)}",
+                        f"Corrected text: {result.corrected_text}",
+                        f"Matches: {format_matches(result)}",
+                    ]
+                )
+            else:
+                lines.append(variant.emotion.note)
+            lines.append("")
+        return "\n".join(lines).rstrip()
+
+    def refresh_graph(self) -> None:
+        if self.last_bundle is None:
+            placeholder_summary = EmotionSummary(False, "Run analysis to see the emotion graph.")
+            self.summary_var.set("Choose an image and run Analyze.")
+            self._set_preview("graph", self.graph_label, make_emotion_graph_image(placeholder_summary), max_size=GRAPH_SIZE)
+            return
+
+        selected_key = self.graph_variant_var.get()
+        if selected_key not in self.last_bundle.variants:
+            selected_key = "thresholded_segmented"
+            self.graph_variant_var.set(selected_key)
+        selected = self.last_bundle.variants[selected_key]
+        self.summary_var.set(self.render_summary(self.last_bundle))
+        self._set_preview("graph", self.graph_label, make_emotion_graph_image(selected.emotion), max_size=GRAPH_SIZE)
 
     def analyze(self) -> None:
         raw_path = self.file_var.get().strip()
@@ -1613,10 +1893,10 @@ class OCRUI:
         self.status_var.set("Analyzing...")
         self.root.update_idletasks()
         try:
-            ocr_result, emotion_summary = self.engine.analyze_image(
+            bundle = self.engine.analyze_image_bundle(
                 image_path=image_path,
                 language=self.language_var.get(),
-                threshold_enabled=self.threshold_var.get(),
+                checkpoint_label=self.checkpoint_var.get(),
                 threshold_value=self.mask_threshold_var.get(),
                 min_component_area=self.min_area_var.get(),
             )
@@ -1625,41 +1905,53 @@ class OCRUI:
             messagebox.showerror("Analysis failed", str(exc))
             return
 
-        self._set_preview("original", self.original_image_label, ocr_result.original_preview)
-        self._set_preview("processed", self.processed_image_label, ocr_result.processed_preview)
-        self._set_preview("model", self.model_image_label, ocr_result.model_input_preview)
-        self.summary_var.set(self.render_summary(ocr_result, emotion_summary))
-        graph_image = make_emotion_graph_image(emotion_summary)
-        self._set_preview("graph", self.graph_label, graph_image, max_size=GRAPH_SIZE)
+        self.last_bundle = bundle
+        self.original_title.configure(text=f"Original\n{bundle.image_path.name}")
+        self._set_preview("original", self.original_image_label, bundle.original_preview, max_size=GRID_PREVIEW_SIZE)
+        self._set_preview("baseline", self.baseline_image_label, bundle.variants["baseline"].ocr.preview_image, max_size=GRID_PREVIEW_SIZE)
+        self._set_preview(
+            "baseline_segmented",
+            self.baseline_segmented_image_label,
+            bundle.variants["baseline_segmented"].ocr.preview_image,
+            max_size=GRID_PREVIEW_SIZE,
+        )
+        self._set_preview(
+            "thresholded_segmented",
+            self.thresholded_image_label,
+            bundle.variants["thresholded_segmented"].ocr.preview_image,
+            max_size=GRID_PREVIEW_SIZE,
+        )
 
-        self.original_title.configure(text="Original")
-        if ocr_result.threshold_enabled:
-            self.processed_title.configure(text="Processed: thresholded + cropped + bounds")
-            self.model_title.configure(text="Model Input: chunk strip")
-        else:
-            self.processed_title.configure(text="Processed: cropped baseline")
-            self.model_title.configure(text="Model Input: resized baseline")
-
-        self.status_var.set(f"Done: {ocr_result.prediction or '<empty>'}")
+        self.baseline_title.configure(text=f"Baseline\n{self._short(bundle.variants['baseline'].ocr.prediction)}")
+        self.baseline_segmented_title.configure(
+            text=f"Baseline + segmented\n{self._short(bundle.variants['baseline_segmented'].ocr.prediction)}"
+        )
+        self.thresholded_title.configure(
+            text=f"Thresholded + segmented\n{self._short(bundle.variants['thresholded_segmented'].ocr.prediction)}"
+        )
+        self.refresh_graph()
+        self.status_var.set(
+            f"Done: {self._short(bundle.variants[self.graph_variant_var.get()].ocr.prediction or '<empty>', limit=70)}"
+        )
 
 
 def run_cli_analysis(
     image_path: Path,
     language: str,
-    threshold_enabled: bool,
+    checkpoint_label: str | None,
     mask_threshold: int,
     min_area: int,
 ) -> int:
     engine = InferenceEngine()
-    ocr_result, emotion_summary = engine.analyze_image(
+    bundle = engine.analyze_image_bundle(
         image_path=image_path,
         language=language,
-        threshold_enabled=threshold_enabled,
+        checkpoint_label=checkpoint_label,
         threshold_value=mask_threshold,
         min_component_area=min_area,
     )
     renderer = OCRUI.__new__(OCRUI)
-    print(renderer.render_output(ocr_result, emotion_summary))
+    print(renderer.render_cli_output(bundle))
     return 0
 
 
@@ -1667,7 +1959,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Standalone handwriting OCR + emotion UI")
     parser.add_argument("--image", type=Path, help="Optional image path for CLI inference")
     parser.add_argument("--language", choices=["ru", "en"], default="ru")
-    parser.add_argument("--threshold", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--checkpoint", type=str, help="Relative or absolute path to .pth checkpoint")
     parser.add_argument("--mask-threshold", type=int, default=MASK_THRESHOLD)
     parser.add_argument("--min-area", type=int, default=MIN_COMPONENT_AREA)
     parser.add_argument("--no-gui", action="store_true", help="Run one CLI inference instead of opening the Tk UI")
@@ -1679,14 +1971,16 @@ def main() -> int:
     if args.no_gui:
         if args.image is None:
             raise SystemExit("--no-gui requires --image")
-        return run_cli_analysis(args.image, args.language, args.threshold, args.mask_threshold, args.min_area)
+        return run_cli_analysis(args.image, args.language, args.checkpoint, args.mask_threshold, args.min_area)
 
     root = tk.Tk()
     app = OCRUI(root)
     if args.image is not None:
         app.file_var.set(str(args.image))
         app.language_var.set(args.language)
-        app.threshold_var.set(args.threshold)
+        app.refresh_checkpoint_options(force_default=True)
+        if args.checkpoint:
+            app.checkpoint_var.set(args.checkpoint)
         app.mask_threshold_var.set(args.mask_threshold)
         app.min_area_var.set(args.min_area)
     root.mainloop()
