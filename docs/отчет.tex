@@ -733,17 +733,93 @@ macOS 26.2 & 3.14 & 2.11 & Apple M1 Pro & 16 ГБ & 14-core GPU \\
 становится радость.
 
 
+\section{Исследование и разработка}
+
+\subsection{Сравнение подходов к распознаванию рукописного текста}
+
+В ходе изучения предметной области были рассмотрены различные варианты реализации
+функционала распознавания рукописного текста и анализа эмоций. Были изучены следующие
+подходы к решению задачи по распознаванию текста с изображений:
+
+\begin{table}[H]
+\centering
+\small
+\renewcommand{\arraystretch}{1.3}
+\begin{tabularx}{\linewidth}{|
+>{\raggedright\arraybackslash}X|
+>{\raggedright\arraybackslash}X|
+>{\raggedright\arraybackslash}X|}
+\hline
+\textbf{Подход} & \textbf{Преимущества} & \textbf{Недостатки} \\
+\hline
+Традиционные методы (SVM, HMM) & 
+Быстрое обучение на небольших данных & 
+Низкая точность на сложных рукописных текстах \\
+\hline
+CRNN (сверточная-рекуррентная нейросеть) & 
+Не требует посимвольной разметки, устойчив к разной длине строк & 
+Требует больше данных и вычислительных ресурсов, чувствителен к качеству предобработки \\
+\hline
+Transformer-based модели (например, TrOCR) &
+Высокая точность, особенно на сложных изображениях &
+Очень требовательны к ресурсам, сложные в обучении, могут переобучаться на небольших датасетах. Сложны в реализации \\
+\hline
+\end{tabularx}
+\caption{Сравнение подходов к распознаванию рукописного текста}
+\label{tab:approaches_comparison}
+\end{table}
+
+На основе проведённого анализа была выбрана архитектура CRNN, так как она
+обеспечивает оптимальный баланс между точностью распознавания и требуемыми
+вычислительными ресурсами.
+
+
+\subsection{Выбор данных для обучения модели}
+
+В качестве первой версии датасета, на котором обучалась модель, был выбран IAM Handwriting
+Database \cite{marti2002iam}. Этот датасет содержит рукописный английский
+текст с аннотациями, что позволяет эффективно обучать модель распознавать английский
+рукописный текст. Особенностью этого датасета является наличие большого количества строк текста,
+что позволяет модели учиться на разнообразных примерах.
+
+После успешного обучения модели на английском языке, было принято решение расширить функционал
+и добавить поддержку русского языка. Для этого был выбран датасет HKR Dataset \cite{hkr2024}, который
+содержит рукописный текст на русском и казахском языках. Этот датасет является более сложным для
+распознавания из-за особенностей формата изображений, но он предоставляет необходимые данные
+для обучения модели на русском языке.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.45\linewidth]{images/iam_example.jpg}
+    \includegraphics[width=0.45\linewidth]{images/hkr_example.png}
+    \caption{Примеры изображений из датасетов IAM (слева) и HKR (справа)}
+    \label{fig:dataset_examples}
+\end{figure}
+
+Процесс подготовки разных датасетов для обучения модели отличался незначительно,
+так как оба датасета предоставляют изображения и текстовые аннотации. Наиболее весомым отличием
+является структура текстов на изображениях: IAM содержит строки текста, а HKR --- словосочетания.
+Данное отличие повлияло на этап постобработки для того, чтобы адаптировать загружаемое изображение
+к формату, на котором обучалась модель. Тем не менее, архитектура CRNN позволяет эффективно работать
+с обоими типами данных.
+
+
+\subsection{Подход к анализу эмоций в тексте}
+
+
+\clearpage
+\addcontentsline{toc}{section}{Список литературы}
 \begin{thebibliography}{9}
 \bibitem{marti2002iam}
-
-\href{https://fki.tic.heia-fr.ch/databases/iam-handwriting-database}{U. Marti and H. Bunke. The IAM-database:
+\href{https://fki.tic.heia-fr.ch/databases/iam-handwriting-database}
+{U. Marti and H. Bunke. The IAM-database:
 An English Sentence Database for Off-line
 Handwriting Recognition. Int'l Journal on
-Document Analysis and Recognition, Volume 5, pages 39 - 46, 2002.}
+Document Analysis and Recognition, Volume 5, pages 39--46, 2002.}
 
 \bibitem{hkr2024}
-
-\href{https://link.springer.com/article/10.1007/s11042-021-11399-6}{Handwritten Kazakh and Russian (HKR) database for text recognition.}
+\href{https://link.springer.com/article/10.1007/s11042-021-11399-6}
+{Handwritten Kazakh and Russian (HKR) database for text recognition.}
 \end{thebibliography}
 
 \end{document}
